@@ -1,17 +1,17 @@
+from fastapi import FastAPI
+from pydantic import BaseModel
 import ollama
 import math
-import re
-from fastapi import FastAPI
+import re  # <--- IMPORTANTE
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
 app = FastAPI()
-
-# Configuración de CORS para que tu React (Frontend) pueda comunicarse
+# 2. Agrega este bloque de "permisos"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=["*"], # Permite conexiones desde tu React
+    allow_credentials=True,
+    allow_methods=["*"], # Permite POST, OPTIONS, etc.
     allow_headers=["*"],
 )
 
@@ -22,40 +22,32 @@ class RequestData(BaseModel):
 async def calcular_con_ia(data: RequestData):
     prompt_usuario = data.prompt
     
-    # Instrucción técnica para el modelo Qwen o Llama
-    # Le pedimos que sea estricto para evitar cálculos "al azar"
     instruccion = (
-        "Actúa como un extractor de datos de ingeniería. "
-        f"Del siguiente texto: '{prompt_usuario}', extrae el diámetro del pistón y la presión. "
-        "Responde ÚNICAMENTE en este formato: diametro,presion. "
-        "Si no encuentras valores numéricos o el texto no tiene sentido técnico, responde: ERROR"
+        "Extrae los valores numéricos de diámetro (inches) y presión (psi). "
+        f"Texto: '{prompt_usuario}'. "
+        "Responde solo con los números separados por coma. Ejemplo: 2.5,90"
     )
     
     try:
-        # Llamada a Ollama
-        response = ollama.generate(model='qwen2.5-coder:7b', prompt=instruccion)
+        # Usamos el modelo chico que corre bien en tu equipo
+        response = ollama.generate(model='qwen2.5-coder:1.5b', prompt=instruccion)
         respuesta_ia = response['response'].strip()
         
-        # Validación de seguridad
-        if "ERROR" in respuesta_ia.upper() or not any(char.isdigit() for char in respuesta_ia):
-            return {"error": "No se detectaron datos técnicos válidos. Por favor especifica diámetro y presión."}
-
-        # Extraer los números con Regex
+        # El REGEX busca cualquier número (con o sin decimales)
         valores = re.findall(r"[-+]?\d*\.\d+|\d+", respuesta_ia)
         
         if len(valores) < 2:
-            return {"error": "Faltan datos (se requiere diámetro y presión)."}
+            return {"error": "No se detectaron diámetro y presión. Intenta decir: 'piston de 2 pulg a 90 psi'"}
 
         d = float(valores[0])
         p = float(valores[1])
         
-        # Lógica de Ingeniería (Pneumática)
         area = (math.pi * math.pow(d, 2)) / 4
         fuerza_lb = area * p
         fuerza_n = fuerza_lb * 4.44822
         
         return {
-            "input_detectado": f"Pistón: {d} in | Presión: {p} psi",
+            "input_detectado": f"Dato extraído: {d} in @ {p} psi",
             "area_pulg2": round(area, 4),
             "fuerza_libras": round(fuerza_lb, 2),
             "fuerza_newtons": round(fuerza_n, 2),
@@ -63,8 +55,4 @@ async def calcular_con_ia(data: RequestData):
         }
 
     except Exception as e:
-        return {"error": f"Error en el motor de IA: {str(e)}"}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+        return {"error": f"Error de conexión: {str(e)}"}
